@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Image Optimizer
  * Description: Converts uploaded images to WebP (optimized) and replaces the original. Zero-config.
- * Version: 0.4.0
+ * Version: 0.5.0
  * Author: Mikel
  * Author URI: https://basterrika.com
  *
@@ -21,7 +21,7 @@ if (!defined('ABSPATH')) {
 final class WP_Image_Optimizer {
     private const bool DISABLE_BIG_IMAGE_SCALING = true;
 
-    private const int WEBP_QUALITY_PHOTO = 85; // JPEG/HEIC/HEIF
+    private const int WEBP_QUALITY_PHOTO = 85; // JPEG/HEIC/HEIF/WebP
     private const int WEBP_QUALITY_ALPHA = 90; // PNG/GIF (better edges/alpha)
 
     private const array CONVERTIBLE_MIME_TYPES = [
@@ -30,6 +30,7 @@ final class WP_Image_Optimizer {
         'image/gif' => true, // non-animated only
         'image/heic' => true,
         'image/heif' => true,
+        'image/webp' => true
     ];
 
     public static function boot(): void {
@@ -67,11 +68,13 @@ final class WP_Image_Optimizer {
         $file = (string)$upload['file'];
         $mime = (string)$upload['type'];
 
-        if ($mime === 'image/webp' || str_ends_with(strtolower($file), '.webp')) {
+        if (!is_file($file)) {
             return $upload;
         }
 
-        if (empty(self::CONVERTIBLE_MIME_TYPES[$mime]) || !is_file($file)) {
+        $is_webp = ($mime === 'image/webp') || str_ends_with(strtolower($file), '.webp');
+
+        if (empty(self::CONVERTIBLE_MIME_TYPES[$mime]) && !$is_webp) {
             return $upload;
         }
 
@@ -95,6 +98,21 @@ final class WP_Image_Optimizer {
             $editor->set_quality($quality);
         }
 
+        // If it's already WebP, re-encode in-place to optimize.
+        if ($is_webp) {
+            $saved = $editor->save($file, 'image/webp');
+            if (is_wp_error($saved) || empty($saved['path']) || !is_file($saved['path'])) {
+                return $upload;
+            }
+
+            $upload['file'] = $saved['path'];
+            $upload['type'] = 'image/webp';
+
+            // URL stays the same (same filename).
+            return $upload;
+        }
+
+        // Otherwise convert to WebP using WP unique naming.
         $target = self::unique_webp_target_path($file);
 
         $saved = $editor->save($target, 'image/webp');
