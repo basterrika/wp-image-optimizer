@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Image Optimizer
- * Description: Converts uploaded images to WebP and replaces the original file (no duplicates). Zero-config.
- * Version: 0.1.0
+ * Description: Converts uploaded images to WebP (optimized) and replaces the original. Zero-config.
+ * Version: 0.2.0
  * Author: Mikel
  * Author URI: https://basterrika.com
  *
@@ -10,8 +10,8 @@
  * Requires at least: 6.5
  * Tested up to: 6.9
  *
- *  Text Domain: wpio
- *  Domain Path: /languages
+ * Text Domain: wpio
+ * Domain Path: /languages
  */
 
 if (!defined('ABSPATH')) {
@@ -19,11 +19,12 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Image_Optimizer {
-    private const int DEFAULT_WEBP_QUALITY_PHOTO = 82; // Visually-lossless-ish for photos
-    private const int DEFAULT_WEBP_QUALITY_ALPHA = 100; // Preserve edges/alpha better
-    private const true DISABLE_BIG_IMAGE_SCALING = true; // Avoid "-scaled" originals
+    private const bool DISABLE_BIG_IMAGE_SCALING = true;
 
-    private static array $convertible_mime_types = [
+    private const int WEBP_QUALITY_PHOTO = 85; // JPEG/HEIC/HEIF
+    private const int WEBP_QUALITY_ALPHA = 90; // PNG/GIF (better edges/alpha)
+
+    private const array CONVERTIBLE_MIME_TYPES = [
         'image/jpeg' => true,
         'image/png' => true,
         'image/gif' => true, // non-animated only
@@ -44,11 +45,7 @@ final class WP_Image_Optimizer {
             self::fail_activation('WordPress image editor is not available on this installation.');
         }
 
-        $supports = wp_image_editor_supports([
-            'mime_type' => 'image/webp',
-        ]);
-
-        if (!$supports) {
+        if (!wp_image_editor_supports(['mime_type' => 'image/webp'])) {
             self::fail_activation('This server cannot generate WebP images (GD/Imagick WebP support missing).');
         }
     }
@@ -57,7 +54,7 @@ final class WP_Image_Optimizer {
         deactivate_plugins(plugin_basename(__FILE__));
         wp_die(
             esc_html($message),
-            esc_html__('WP Image Optimizer', 'wpio'),
+            esc_html__('Image Optimizer', 'wpio'),
             ['back_link' => true]
         );
     }
@@ -67,33 +64,29 @@ final class WP_Image_Optimizer {
             return $upload;
         }
 
-        $file = $upload['file'];
-        $mime = $upload['type'];
+        $file = (string)$upload['file'];
+        $mime = (string)$upload['type'];
 
         if ($mime === 'image/webp' || str_ends_with(strtolower($file), '.webp')) {
             return $upload;
         }
 
-        // Only handle known raster types.
-        $convertible = (array)apply_filters('wpio_convertible_mime_types', self::$convertible_mime_types);
-        if (empty($convertible[$mime])) {
+        if (empty(self::CONVERTIBLE_MIME_TYPES[$mime]) || !is_file($file)) {
             return $upload;
         }
 
-        // Skip animated GIFs (core editors typically flatten them)
+        // Avoid flattening animated GIFs.
         if ($mime === 'image/gif' && self::is_animated_gif($file)) {
             return $upload;
         }
 
         $editor = wp_get_image_editor($file);
         if (is_wp_error($editor)) {
-            return $upload; // Fail silently: do not break uploads
+            return $upload;
         }
 
-        // Fix orientation for JPEG-like sources when possible (EXIF)
         self::maybe_fix_exif_orientation($file, $mime, $editor);
 
-        // Strip metadata where editor supports it
         if (method_exists($editor, 'strip_meta')) {
             try {
                 $editor->strip_meta();
@@ -103,48 +96,25 @@ final class WP_Image_Optimizer {
             }
         }
 
-        $quality = self::choose_quality($file, $mime);
-
-        /**
-         * Filter: adjust WebP quality (0-100).
-         *
-         * @param int $quality
-         * @param string $mime
-         * @param string $file
-         */
-        $quality = (int)apply_filters('wpio_webp_quality', $quality, $mime, $file);
-        $quality = max(0, min(100, $quality));
+        $quality = in_array($mime, ['image/png', 'image/gif'], true)
+            ? self::WEBP_QUALITY_ALPHA
+            : self::WEBP_QUALITY_PHOTO;
 
         $target = self::replace_extension_with_webp($file);
 
-        // Save WebP
-        $saved = $editor->save($target, 'image/webp', ['quality' => $quality]);
-        if (is_wp_error($saved) || empty($saved['path']) || !file_exists($saved['path'])) {
+        $saved = $editor->save($target, 'image/webp');
+        if (is_wp_error($saved) || empty($saved['path']) || !is_file($saved['path'])) {
             return $upload;
         }
 
-        // Remove original (no double storage).
-        self::safe_unlink($file);
+        // Replace original (no double storage).
+        self::delete_file($file);
 
-        // Update upload info
         $upload['file'] = $saved['path'];
         $upload['type'] = 'image/webp';
-        $upload['url'] = self::replace_url_extension_with_webp($upload['url']);
+        $upload['url'] = self::replace_url_extension_with_webp((string)$upload['url']);
 
         return $upload;
-    }
-
-    private static function choose_quality(string $file, string $mime): int {
-        // Prefer max quality for alpha/transparency sources.
-        if ($mime === 'image/png') {
-            return self::png_has_alpha($file) ? self::DEFAULT_WEBP_QUALITY_ALPHA : self::DEFAULT_WEBP_QUALITY_PHOTO;
-        }
-
-        if ($mime === 'image/gif') {
-            return self::DEFAULT_WEBP_QUALITY_ALPHA;
-        }
-
-        return self::DEFAULT_WEBP_QUALITY_PHOTO;
     }
 
     private static function replace_extension_with_webp(string $path): string {
@@ -155,59 +125,21 @@ final class WP_Image_Optimizer {
     }
 
     private static function replace_url_extension_with_webp(string $url): string {
-        $parts = wp_parse_url($url);
-
-        if (!is_array($parts) || empty($parts['path'])) {
-            // Fallback: basic replace
-            return preg_replace('~\.[a-zA-Z0-9]+$~', '.webp', $url) ?? $url;
-        }
-
-        $path = (string)$parts['path'];
-        $path = preg_replace('~\.[a-zA-Z0-9]+$~', '.webp', $path) ?? $path;
-
-        // Rebuild URL minimally.
-        $rebuilt = '';
-        if (!empty($parts['scheme'])) {
-            $rebuilt .= $parts['scheme'] . '://';
-        }
-
-        if (!empty($parts['user'])) {
-            $rebuilt .= $parts['user'];
-
-            if (!empty($parts['pass'])) {
-                $rebuilt .= ':' . $parts['pass'];
-            }
-
-            $rebuilt .= '@';
-        }
-
-        if (!empty($parts['host'])) {
-            $rebuilt .= $parts['host'];
-        }
-
-        if (!empty($parts['port'])) {
-            $rebuilt .= ':' . $parts['port'];
-        }
-
-        $rebuilt .= $path;
-
-        if (!empty($parts['query'])) {
-            $rebuilt .= '?' . $parts['query'];
-        }
-
-        if (!empty($parts['fragment'])) {
-            $rebuilt .= '#' . $parts['fragment'];
-        }
-
-        return $rebuilt ?: $url;
+        return preg_replace('~\.[a-zA-Z0-9]+$~', '.webp', $url) ?? $url;
     }
 
-    private static function safe_unlink(string $path): void {
+    private static function delete_file(string $path): void {
         if (!is_file($path)) {
             return;
         }
 
         try {
+            if (function_exists('wp_delete_file')) {
+                @wp_delete_file($path);
+
+                return;
+            }
+
             @unlink($path);
         }
         catch (Throwable) {
@@ -215,83 +147,25 @@ final class WP_Image_Optimizer {
         }
     }
 
-    private static function png_has_alpha(string $path): bool {
-        if (!function_exists('imagecreatefrompng')) {
-            return true; // safer default: preserve quality
-        }
-
-        try {
-            $im = @imagecreatefrompng($path);
-            if (!$im) {
-                return true;
-            }
-
-            // If the image has a transparent color index, treat as alpha-like.
-            $transparentIndex = imagecolortransparent($im);
-            if ($transparentIndex >= 0) {
-                imagedestroy($im);
-
-                return true;
-            }
-
-            // Check alpha channel quickly by sampling a small grid.
-            $w = imagesx($im);
-            $h = imagesy($im);
-
-            $steps = 8; // 8x8 samples
-            for ($xi = 0; $xi <= $steps; $xi++) {
-                for ($yi = 0; $yi <= $steps; $yi++) {
-                    $x = (int)floor(($w - 1) * ($xi / $steps));
-                    $y = (int)floor(($h - 1) * ($yi / $steps));
-
-                    $rgba = imagecolorat($im, $x, $y);
-
-                    // For truecolor PNG, alpha is highest 7 bits of the 32-bit int (0 opaque, 127 transparent).
-                    $alpha = ($rgba & 0x7F000000) >> 24;
-
-                    if ($alpha > 0) {
-                        imagedestroy($im);
-
-                        return true;
-                    }
-                }
-            }
-
-            imagedestroy($im);
-
-            return false;
-        }
-        catch (Throwable) {
-            return true;
-        }
-    }
-
     private static function is_animated_gif(string $path): bool {
-        // Look for multiple frame headers.
-        // Based on the common pattern of graphic control extension + image descriptor.
-        $contents = @file_get_contents($path, false, null, 0, 1024 * 200); // read first 200KB
-
+        $contents = @file_get_contents($path, false, null, 0, 1024 * 200);
         if ($contents === false) {
             return false;
         }
 
+        // Count Graphic Control Extensions; >1 usually indicates multiple frames.
         $count = 0;
-        $pattern = "\x00\x21\xF9\x04"; // Graphic Control Extension
+        $pattern = "\x00\x21\xF9\x04";
         $pos = 0;
 
         while (true) {
             $pos = strpos($contents, $pattern, $pos);
-
             if ($pos === false) {
                 break;
             }
-
-            $count++;
-
-            if ($count > 1) {
+            if (++$count > 1) {
                 return true;
             }
-
             $pos += 4;
         }
 
@@ -299,12 +173,7 @@ final class WP_Image_Optimizer {
     }
 
     private static function maybe_fix_exif_orientation(string $file, string $mime, object $editor): void {
-        // Only relevant for JPEG-ish sources; HEIC might carry orientation too but handling varies per server/editor.
-        if ($mime !== 'image/jpeg') {
-            return;
-        }
-
-        if (!function_exists('exif_read_data')) {
+        if ($mime !== 'image/jpeg' || !function_exists('exif_read_data')) {
             return;
         }
 
@@ -314,8 +183,7 @@ final class WP_Image_Optimizer {
                 return;
             }
 
-            $orientation = (int)$exif['Orientation'];
-            $rotate = match ($orientation) {
+            $rotate = match ((int)$exif['Orientation']) {
                 3 => 180,
                 6 => -90,
                 8 => 90,
