@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Image Optimizer
  * Description: Converts uploaded images to WebP (optimized) and replaces the original. Zero-config.
- * Version: 0.6.0
+ * Version: 0.7.0
  * Author: Mikel
  * Author URI: https://basterrika.com
  *
@@ -35,6 +35,7 @@ final class WP_Image_Optimizer {
 
     public static function boot(): void {
         add_filter('wp_handle_upload', [self::class, 'maybe_convert_upload_to_webp'], 20);
+        add_filter('wp_handle_sideload', [self::class, 'maybe_convert_upload_to_webp'], 20);
 
         if (self::DISABLE_BIG_IMAGE_SCALING) {
             add_filter('big_image_size_threshold', '__return_false');
@@ -147,7 +148,10 @@ final class WP_Image_Optimizer {
 
         $upload['file'] = $saved['path'];
         $upload['type'] = 'image/webp';
-        $upload['url'] = self::replace_url_basename((string)$upload['url'], basename($saved['path']));
+
+        if (!empty($upload['url'])) {
+            $upload['url'] = self::replace_url_basename((string)$upload['url'], basename($saved['path']));
+        }
 
         return $upload;
     }
