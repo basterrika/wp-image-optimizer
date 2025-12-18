@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Image Optimizer
  * Description: Converts uploaded images to WebP (optimized) and replaces the original. Zero-config.
- * Version: 0.3.0
+ * Version: 0.4.0
  * Author: Mikel
  * Author URI: https://basterrika.com
  *
@@ -95,7 +95,7 @@ final class WP_Image_Optimizer {
             $editor->set_quality($quality);
         }
 
-        $target = self::replace_extension_with_webp($file);
+        $target = self::unique_webp_target_path($file);
 
         $saved = $editor->save($target, 'image/webp');
         if (is_wp_error($saved) || empty($saved['path']) || !is_file($saved['path'])) {
@@ -107,20 +107,22 @@ final class WP_Image_Optimizer {
 
         $upload['file'] = $saved['path'];
         $upload['type'] = 'image/webp';
-        $upload['url'] = self::replace_url_extension_with_webp((string)$upload['url']);
+        $upload['url'] = self::replace_url_basename((string)$upload['url'], basename($saved['path']));
 
         return $upload;
     }
 
-    private static function replace_extension_with_webp(string $path): string {
-        $dir = dirname($path);
-        $name = pathinfo($path, PATHINFO_FILENAME);
+    private static function unique_webp_target_path(string $originalPath): string {
+        $dir = dirname($originalPath);
+        $base = pathinfo($originalPath, PATHINFO_FILENAME);
 
-        return $dir . DIRECTORY_SEPARATOR . $name . '.webp';
+        $uniqueFilename = wp_unique_filename($dir, $base . '.webp');
+
+        return $dir . DIRECTORY_SEPARATOR . $uniqueFilename;
     }
 
-    private static function replace_url_extension_with_webp(string $url): string {
-        return preg_replace('~\.[a-zA-Z0-9]+$~', '.webp', $url) ?? $url;
+    private static function replace_url_basename(string $url, string $newBasename): string {
+        return preg_replace('~[^/?#]+(?=([?#]|$))~', $newBasename, $url) ?? $url;
     }
 
     private static function delete_file(string $path): void {
