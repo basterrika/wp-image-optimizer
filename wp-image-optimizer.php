@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Image Optimizer
  * Description: Converts uploaded images to WebP (optimized) and replaces the original. Zero-config.
- * Version: 0.5.0
+ * Version: 0.6.0
  * Author: Mikel
  * Author URI: https://basterrika.com
  *
@@ -72,14 +72,29 @@ final class WP_Image_Optimizer {
             return $upload;
         }
 
-        $is_webp = ($mime === 'image/webp') || str_ends_with(strtolower($file), '.webp');
+        // Prefer content-based detection when available (protects against spoofed MIME/ext)
+        $detected_mime = $mime;
+        if (function_exists('wp_check_filetype_and_ext')) {
+            try {
+                $checked = wp_check_filetype_and_ext($file, basename($file));
+                if (is_array($checked) && !empty($checked['type']) && is_string($checked['type'])) {
+                    $detected_mime = $checked['type'];
+                }
+            }
+            catch (Throwable) {
+                // ignore
+            }
+        }
 
-        if (empty(self::CONVERTIBLE_MIME_TYPES[$mime]) && !$is_webp) {
+        $ext = strtolower((string)pathinfo($file, PATHINFO_EXTENSION));
+        $is_webp_ext = ($ext === 'webp');
+
+        if (!$is_webp_ext && empty(self::CONVERTIBLE_MIME_TYPES[$detected_mime])) {
             return $upload;
         }
 
-        // Avoid flattening animated GIFs.
-        if ($mime === 'image/gif' && self::is_animated_gif($file)) {
+        // Avoid flattening animated GIFs
+        if ($detected_mime === 'image/gif' && self::is_animated_gif($file)) {
             return $upload;
         }
 
@@ -88,9 +103,9 @@ final class WP_Image_Optimizer {
             return $upload;
         }
 
-        self::maybe_fix_exif_orientation($file, $mime, $editor);
+        self::maybe_fix_exif_orientation($file, $detected_mime, $editor);
 
-        $quality = in_array($mime, ['image/png', 'image/gif'], true)
+        $quality = in_array($detected_mime, ['image/png', 'image/gif'], true)
             ? self::WEBP_QUALITY_ALPHA
             : self::WEBP_QUALITY_PHOTO;
 
@@ -98,8 +113,15 @@ final class WP_Image_Optimizer {
             $editor->set_quality($quality);
         }
 
-        // If it's already WebP, re-encode in-place to optimize.
-        if ($is_webp) {
+        /**
+         * WebP is treated differently on purpose:
+         * - If the uploaded file is already named ".webp", we re-encode it IN PLACE to keep the same filename/URL.
+         *   Otherwise, generating a new "unique" filename would typically force "image-1.webp" because "image.webp"
+         *   already exists at upload time.
+         * - We only do in-place re-encoding when the extension is truly ".webp" to avoid mismatches like writing WebP
+         *   bytes into a ".jpg" file path.
+         */
+        if ($is_webp_ext) {
             $saved = $editor->save($file, 'image/webp');
             if (is_wp_error($saved) || empty($saved['path']) || !is_file($saved['path'])) {
                 return $upload;
