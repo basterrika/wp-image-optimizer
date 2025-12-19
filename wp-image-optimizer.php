@@ -2,16 +2,13 @@
 /**
  * Plugin Name: Image Optimizer
  * Description: Converts uploaded images to WebP (optimized) and replaces the original. Zero-config.
- * Version: 0.7.0
+ * Version: 0.7.1
  * Author: Mikel
  * Author URI: https://basterrika.com
  *
  * Requires PHP: 8.4
  * Requires at least: 6.5
  * Tested up to: 6.9
- *
- * Text Domain: wpio
- * Domain Path: /languages
  */
 
 if (!defined('ABSPATH')) {
@@ -56,7 +53,7 @@ final class WP_Image_Optimizer {
         deactivate_plugins(plugin_basename(__FILE__));
         wp_die(
             esc_html($message),
-            esc_html__('Image Optimizer', 'wpio'),
+            'Image Optimizer',
             ['back_link' => true]
         );
     }
@@ -242,4 +239,4 @@ final class WP_Image_Optimizer {
 }
 
 register_activation_hook(__FILE__, [WP_Image_Optimizer::class, 'activate']);
-add_action('plugins_loaded', [WP_Image_Optimizer::class, 'boot']);
+WP_Image_Optimizer::boot();
