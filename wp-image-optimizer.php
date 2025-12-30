@@ -172,13 +172,7 @@ final class WP_Image_Optimizer {
         }
 
         try {
-            if (function_exists('wp_delete_file')) {
-                @wp_delete_file($path);
-
-                return;
-            }
-
-            @unlink($path);
+            wp_delete_file($path);
         }
         catch (Throwable) {
             // ignore
