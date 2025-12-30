@@ -1,6 +1,6 @@
 # Image Optimizer for WordPress
 
-Zero-config plugin that converts uploaded images to **WebP** and replaces the original file.
+Converts uploaded images to WebP (optimized) and replaces the original. Zero-config.
 
 ## What it does
 
