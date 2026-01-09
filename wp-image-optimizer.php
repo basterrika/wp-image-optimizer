@@ -159,12 +159,12 @@ final class WP_Image_Optimizer {
         return $upload;
     }
 
-    private static function unique_webp_target_path(string $originalPath): string {
-        $dir = dirname($originalPath);
-        $base = pathinfo($originalPath, PATHINFO_FILENAME);
-        $uniqueFilename = wp_unique_filename($dir, $base . '.webp');
+    private static function unique_webp_target_path(string $original_path): string {
+        $dir = dirname($original_path);
+        $base = pathinfo($original_path, PATHINFO_FILENAME);
+        $unique_filename = wp_unique_filename($dir, $base . '.webp');
 
-        return trailingslashit($dir) . $uniqueFilename;
+        return trailingslashit($dir) . $unique_filename;
     }
 
     private static function replace_url_basename(string $url, string $new_basename): string {
