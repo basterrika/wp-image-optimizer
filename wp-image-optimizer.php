@@ -167,8 +167,8 @@ final class WP_Image_Optimizer {
         return trailingslashit($dir) . $uniqueFilename;
     }
 
-    private static function replace_url_basename(string $url, string $newBasename): string {
-        if ($url === '' || $newBasename === '') {
+    private static function replace_url_basename(string $url, string $new_basename): string {
+        if ($url === '' || $new_basename === '') {
             return $url;
         }
 
@@ -186,11 +186,12 @@ final class WP_Image_Optimizer {
         $suffix = substr($url, $cut_pos);
 
         $last_slash = strrpos($base_url, '/');
+
         if ($last_slash === false) {
-            return $newBasename . $suffix;
+            return $new_basename . $suffix;
         }
 
-        return substr($base_url, 0, $last_slash + 1) . $newBasename . $suffix;
+        return substr($base_url, 0, $last_slash + 1) . $new_basename . $suffix;
     }
 
     private static function delete_file(string $path): void {
