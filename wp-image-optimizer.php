@@ -168,7 +168,29 @@ final class WP_Image_Optimizer {
     }
 
     private static function replace_url_basename(string $url, string $newBasename): string {
-        return preg_replace('~[^/?#]+(?=([?#]|$))~', $newBasename, $url) ?? $url;
+        if ($url === '' || $newBasename === '') {
+            return $url;
+        }
+
+        $query_pos = strpos($url, '?');
+        $fragment_pos = strpos($url, '#');
+
+        $cut_pos = match (true) {
+            $query_pos !== false && $fragment_pos !== false => min($query_pos, $fragment_pos),
+            $query_pos !== false => $query_pos,
+            $fragment_pos !== false => $fragment_pos,
+            default => strlen($url),
+        };
+
+        $base_url = substr($url, 0, $cut_pos);
+        $suffix = substr($url, $cut_pos);
+
+        $last_slash = strrpos($base_url, '/');
+        if ($last_slash === false) {
+            return $newBasename . $suffix;
+        }
+
+        return substr($base_url, 0, $last_slash + 1) . $newBasename . $suffix;
     }
 
     private static function delete_file(string $path): void {
