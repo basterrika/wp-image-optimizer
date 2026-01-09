@@ -59,7 +59,13 @@ final class WP_Image_Optimizer {
     }
 
     public static function maybe_convert_upload_to_webp(array $upload): array {
-        if (empty($upload['file']) || empty($upload['type'])) {
+        if (
+            !isset($upload['file'], $upload['type']) ||
+            !is_string($upload['file']) ||
+            !is_string($upload['type']) ||
+            $upload['file'] === '' ||
+            $upload['type'] === ''
+        ) {
             return $upload;
         }
 
