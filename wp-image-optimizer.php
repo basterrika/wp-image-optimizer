@@ -156,10 +156,9 @@ final class WP_Image_Optimizer {
     private static function unique_webp_target_path(string $originalPath): string {
         $dir = dirname($originalPath);
         $base = pathinfo($originalPath, PATHINFO_FILENAME);
-
         $uniqueFilename = wp_unique_filename($dir, $base . '.webp');
 
-        return $dir . DIRECTORY_SEPARATOR . $uniqueFilename;
+        return trailingslashit($dir) . $uniqueFilename;
     }
 
     private static function replace_url_basename(string $url, string $newBasename): string {
