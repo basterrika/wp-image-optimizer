@@ -194,15 +194,8 @@ final class WP_Image_Optimizer {
     }
 
     private static function delete_file(string $path): void {
-        if (!is_file($path)) {
-            return;
-        }
-
-        try {
+        if (is_file($path)) {
             wp_delete_file($path);
-        }
-        catch (Throwable) {
-            // ignore
         }
     }
 
