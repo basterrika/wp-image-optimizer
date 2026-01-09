@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Image Optimizer
  * Description: Converts uploaded images to WebP (optimized) and replaces the original. Zero-config.
- * Version: 0.7.1
+ * Version: 0.8.0
  * Author: Mikel
  * Author URI: https://basterrika.com
  *
@@ -69,31 +69,22 @@ final class WP_Image_Optimizer {
             return $upload;
         }
 
-        $file = (string)$upload['file'];
-        $mime = (string)$upload['type'];
+        $file = $upload['file'];
 
         if (!is_file($file)) {
             return $upload;
         }
 
-        // Prefer content-based detection when available (protects against spoofed MIME/ext)
-        $detected_mime = $mime;
-        if (function_exists('wp_check_filetype_and_ext')) {
-            try {
-                $checked = wp_check_filetype_and_ext($file, basename($file));
-                if (is_array($checked) && !empty($checked['type']) && is_string($checked['type'])) {
-                    $detected_mime = $checked['type'];
-                }
-            }
-            catch (Throwable) {
-                // ignore
-            }
+        $detected_mime = self::detect_mime_type($file);
+
+        if ($detected_mime === null) {
+            return $upload;
         }
 
-        $ext = strtolower((string)pathinfo($file, PATHINFO_EXTENSION));
+        $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
         $is_webp_ext = ($ext === 'webp');
 
-        if (!$is_webp_ext && empty(self::CONVERTIBLE_MIME_TYPES[$detected_mime])) {
+        if (!$is_webp_ext && !isset(self::CONVERTIBLE_MIME_TYPES[$detected_mime])) {
             return $upload;
         }
 
@@ -107,15 +98,13 @@ final class WP_Image_Optimizer {
             return $upload;
         }
 
-        self::maybe_fix_exif_orientation($file, $detected_mime, $editor);
+        $editor->maybe_exif_rotate();
 
         $quality = in_array($detected_mime, ['image/png', 'image/gif'], true)
             ? self::WEBP_QUALITY_ALPHA
             : self::WEBP_QUALITY_PHOTO;
 
-        if (method_exists($editor, 'set_quality')) {
-            $editor->set_quality($quality);
-        }
+        $editor->set_quality($quality);
 
         /**
          * WebP is treated differently on purpose:
@@ -126,34 +115,52 @@ final class WP_Image_Optimizer {
          *   bytes into a ".jpg" file path.
          */
         if ($is_webp_ext) {
-            $saved = $editor->save($file, 'image/webp');
-            if (is_wp_error($saved) || empty($saved['path']) || !is_file($saved['path'])) {
-                return $upload;
-            }
-
-            $upload['file'] = $saved['path'];
-            $upload['type'] = 'image/webp';
-
-            // URL stays the same (same filename).
-            return $upload;
+            return self::save_in_place($editor, $file, $upload);
         }
 
-        // Otherwise convert to WebP using WP unique naming.
-        $target = self::unique_webp_target_path($file);
+        return self::convert_to_webp($editor, $file, $upload);
+    }
 
-        $saved = $editor->save($target, 'image/webp');
+    private static function detect_mime_type(string $file): ?string {
+        $checked = wp_check_filetype_and_ext($file, basename($file));
+
+        if (is_array($checked) && !empty($checked['type']) && is_string($checked['type'])) {
+            return $checked['type'];
+        }
+
+        return null;
+    }
+
+    private static function save_in_place(object $editor, string $file, array $upload): array {
+        $saved = $editor->save($file, 'image/webp');
+
         if (is_wp_error($saved) || empty($saved['path']) || !is_file($saved['path'])) {
             return $upload;
         }
 
-        // Replace original (no double storage).
+        $upload['file'] = $saved['path'];
+        $upload['type'] = 'image/webp';
+
+        // URL stays the same (same filename)
+        return $upload;
+    }
+
+    private static function convert_to_webp(object $editor, string $file, array $upload): array {
+        $target = self::unique_webp_target_path($file);
+        $saved = $editor->save($target, 'image/webp');
+
+        if (is_wp_error($saved) || empty($saved['path']) || !is_file($saved['path'])) {
+            return $upload;
+        }
+
+        // Replace original (no double storage)
         self::delete_file($file);
 
         $upload['file'] = $saved['path'];
         $upload['type'] = 'image/webp';
 
-        if (!empty($upload['url'])) {
-            $upload['url'] = self::replace_url_basename((string)$upload['url'], basename($saved['path']));
+        if (isset($upload['url']) && is_string($upload['url']) && $upload['url'] !== '') {
+            $upload['url'] = self::replace_url_basename($upload['url'], basename($saved['path']));
         }
 
         return $upload;
@@ -223,33 +230,6 @@ final class WP_Image_Optimizer {
         }
 
         return false;
-    }
-
-    private static function maybe_fix_exif_orientation(string $file, string $mime, object $editor): void {
-        if ($mime !== 'image/jpeg' || !function_exists('exif_read_data')) {
-            return;
-        }
-
-        try {
-            $exif = @exif_read_data($file);
-            if (!is_array($exif) || empty($exif['Orientation'])) {
-                return;
-            }
-
-            $rotate = match ((int)$exif['Orientation']) {
-                3 => 180,
-                6 => -90,
-                8 => 90,
-                default => 0,
-            };
-
-            if ($rotate !== 0 && method_exists($editor, 'rotate')) {
-                $editor->rotate($rotate);
-            }
-        }
-        catch (Throwable) {
-            // ignore
-        }
     }
 }
 
