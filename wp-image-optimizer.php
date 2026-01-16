@@ -131,7 +131,7 @@ final class WP_Image_Optimizer {
         return null;
     }
 
-    private static function save_in_place(object $editor, string $file, array $upload): array {
+    private static function save_in_place(WP_Image_Editor $editor, string $file, array $upload): array {
         $saved = $editor->save($file, 'image/webp');
 
         if (is_wp_error($saved) || empty($saved['path']) || !is_file($saved['path'])) {
@@ -145,7 +145,7 @@ final class WP_Image_Optimizer {
         return $upload;
     }
 
-    private static function convert_to_webp(object $editor, string $file, array $upload): array {
+    private static function convert_to_webp(WP_Image_Editor $editor, string $file, array $upload): array {
         $target = self::unique_webp_target_path($file);
         $saved = $editor->save($target, 'image/webp');
 
