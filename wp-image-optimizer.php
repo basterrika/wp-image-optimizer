@@ -208,7 +208,12 @@ final class WP_Image_Optimizer {
     }
 
     private static function is_animated_gif(string $path): bool {
-        $contents = @file_get_contents($path, false, null, 0, 1024 * 200);
+        if (!is_readable($path)) {
+            return false;
+        }
+
+        $contents = file_get_contents($path, false, null, 0, 1024 * 200);
+
         if ($contents === false) {
             return false;
         }
