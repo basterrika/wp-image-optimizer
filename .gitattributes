@@ -1,0 +1,11 @@
+# Files and directories marked with "export-ignore" will be excluded from
+# the release packages (e.g., `.zip` and `.tar.gz` archives) to ensure
+# only necessary files are included for end-users.
+
+README.md export-ignore
+
+# Development and configuration files
+
+.editorconfig export-ignore
+.gitattributes export-ignore
+.gitignore export-ignore
