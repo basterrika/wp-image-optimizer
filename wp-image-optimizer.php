@@ -5,7 +5,7 @@
  * Version: 1.0.0
  * Author: Mikel
  * Author URI: https://basterrika.com
- *
+ * Update URI: https://github.com/basterrika/wp-image-optimizer
  * Requires PHP: 8.4
  * Requires at least: 6.5
  * Tested up to: 6.9
