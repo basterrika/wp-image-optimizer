@@ -16,8 +16,6 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Image_Optimizer {
-    private const bool DISABLE_BIG_IMAGE_SCALING = true;
-
     private const int WEBP_QUALITY_PHOTO = 85; // JPEG/HEIC/HEIF/WebP
     private const int WEBP_QUALITY_ALPHA = 90; // PNG/GIF (better edges/alpha)
 
@@ -34,9 +32,8 @@ final class WP_Image_Optimizer {
         add_filter('wp_handle_upload', [self::class, 'maybe_convert_upload_to_webp'], 20);
         add_filter('wp_handle_sideload', [self::class, 'maybe_convert_upload_to_webp'], 20);
 
-        if (self::DISABLE_BIG_IMAGE_SCALING) {
-            add_filter('big_image_size_threshold', '__return_false');
-        }
+        // Disable WordPress's 2560px big-image auto-downscaling.
+        add_filter('big_image_size_threshold', '__return_false');
     }
 
     public static function activate(): void {
