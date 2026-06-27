@@ -160,7 +160,7 @@ final class WP_Image_Optimizer {
         $upload['type'] = 'image/webp';
 
         if (isset($upload['url']) && is_string($upload['url']) && $upload['url'] !== '') {
-            $upload['url'] = self::replace_url_basename($upload['url'], basename($saved['path']));
+            $upload['url'] = dirname($upload['url']) . '/' . basename($saved['path']);
         }
 
         return $upload;
@@ -172,33 +172,6 @@ final class WP_Image_Optimizer {
         $unique_filename = wp_unique_filename($dir, $base . '.webp');
 
         return trailingslashit($dir) . $unique_filename;
-    }
-
-    private static function replace_url_basename(string $url, string $new_basename): string {
-        if ($url === '' || $new_basename === '') {
-            return $url;
-        }
-
-        $query_pos = strpos($url, '?');
-        $fragment_pos = strpos($url, '#');
-
-        $cut_pos = match (true) {
-            $query_pos !== false && $fragment_pos !== false => min($query_pos, $fragment_pos),
-            $query_pos !== false => $query_pos,
-            $fragment_pos !== false => $fragment_pos,
-            default => strlen($url),
-        };
-
-        $base_url = substr($url, 0, $cut_pos);
-        $suffix = substr($url, $cut_pos);
-
-        $last_slash = strrpos($base_url, '/');
-
-        if ($last_slash === false) {
-            return $new_basename . $suffix;
-        }
-
-        return substr($base_url, 0, $last_slash + 1) . $new_basename . $suffix;
     }
 
     private static function delete_file(string $path): void {
