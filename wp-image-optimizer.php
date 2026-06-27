@@ -140,7 +140,7 @@ final class WP_Image_Optimizer {
         }
 
         // Replace original (no double storage)
-        self::delete_file($file);
+        wp_delete_file($file);
 
         $upload['file'] = $saved['path'];
         $upload['type'] = 'image/webp';
@@ -158,12 +158,6 @@ final class WP_Image_Optimizer {
         $unique_filename = wp_unique_filename($dir, $base . '.webp');
 
         return trailingslashit($dir) . $unique_filename;
-    }
-
-    private static function delete_file(string $path): void {
-        if (is_file($path)) {
-            wp_delete_file($path);
-        }
     }
 
     private static function is_animated_gif(string $path): bool {
