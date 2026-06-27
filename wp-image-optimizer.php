@@ -75,11 +75,7 @@ final class WP_Image_Optimizer {
             return $upload;
         }
 
-        $detected_mime = self::detect_mime_type($file);
-
-        if ($detected_mime === null) {
-            return $upload;
-        }
+        $detected_mime = $upload['type'];
 
         $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
         $is_webp_ext = ($ext === 'webp');
@@ -119,16 +115,6 @@ final class WP_Image_Optimizer {
         }
 
         return self::convert_to_webp($editor, $file, $upload);
-    }
-
-    private static function detect_mime_type(string $file): ?string {
-        $checked = wp_check_filetype_and_ext($file, basename($file));
-
-        if (is_array($checked) && !empty($checked['type']) && is_string($checked['type'])) {
-            return $checked['type'];
-        }
-
-        return null;
     }
 
     private static function save_in_place(WP_Image_Editor $editor, string $file, array $upload): array {
