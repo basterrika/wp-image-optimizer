@@ -2,13 +2,13 @@
 /**
  * Plugin Name: Image Optimizer
  * Description: Converts uploaded images to WebP (optimized) and replaces the original. Zero-config.
- * Version: 1.0.1
+ * Version: 1.1.0
  * Author: Mikel
  * Author URI: https://basterrika.com
  * Update URI: https://github.com/basterrika/wp-image-optimizer
  * Requires PHP: 8.4
  * Requires at least: 6.5
- * Tested up to: 6.9
+ * Tested up to: 7.0
  */
 
 if (!defined('ABSPATH')) {
