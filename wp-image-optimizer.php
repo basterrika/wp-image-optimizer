@@ -16,6 +16,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Image_Optimizer {
+    private const int MAX_IMAGE_DIMENSION = 2560;
     private const int WEBP_QUALITY_PHOTO = 85; // JPEG/HEIC/HEIF/WebP
     private const int WEBP_QUALITY_ALPHA = 90; // PNG/GIF (better edges/alpha)
 
@@ -32,7 +33,7 @@ final class WP_Image_Optimizer {
         // Also fires for sideloads.
         add_filter('wp_handle_upload', [self::class, 'maybe_convert_upload_to_webp'], 20);
 
-        // Disable WordPress's 2560px big-image auto-downscaling.
+        // Scaling happens before WebP save; prevent core from adding a "-scaled" file.
         add_filter('big_image_size_threshold', '__return_false');
     }
 
@@ -86,6 +87,14 @@ final class WP_Image_Optimizer {
         }
 
         $editor->maybe_exif_rotate();
+
+        if (max($editor->get_size()) > self::MAX_IMAGE_DIMENSION) {
+            $resized = $editor->resize(self::MAX_IMAGE_DIMENSION, self::MAX_IMAGE_DIMENSION);
+
+            if (is_wp_error($resized)) {
+                return $upload;
+            }
+        }
 
         $quality = in_array($detected_mime, ['image/png', 'image/gif'], true)
             ? self::WEBP_QUALITY_ALPHA
