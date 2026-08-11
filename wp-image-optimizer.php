@@ -29,8 +29,8 @@ final class WP_Image_Optimizer {
     ];
 
     public static function boot(): void {
+        // Also fires for sideloads.
         add_filter('wp_handle_upload', [self::class, 'maybe_convert_upload_to_webp'], 20);
-        add_filter('wp_handle_sideload', [self::class, 'maybe_convert_upload_to_webp'], 20);
 
         // Disable WordPress's 2560px big-image auto-downscaling.
         add_filter('big_image_size_threshold', '__return_false');
