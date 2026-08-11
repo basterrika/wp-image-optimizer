@@ -67,19 +67,13 @@ final class WP_Image_Optimizer {
         }
 
         $file = $upload['file'];
-
-        if (!is_file($file)) {
-            return $upload;
-        }
-
         $detected_mime = $upload['type'];
 
-        $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
-        $is_webp_ext = ($ext === 'webp');
-
-        if (!$is_webp_ext && !isset(self::CONVERTIBLE_MIME_TYPES[$detected_mime])) {
+        if (!isset(self::CONVERTIBLE_MIME_TYPES[$detected_mime])) {
             return $upload;
         }
+
+        $is_webp_ext = str_ends_with(strtolower($file), '.webp');
 
         // Avoid flattening animated GIFs
         if ($detected_mime === 'image/gif' && self::is_animated_gif($file)) {
