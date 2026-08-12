@@ -88,12 +88,16 @@ final class WP_Image_Optimizer {
 
         $editor->maybe_exif_rotate();
 
+        $was_resized = false;
+
         if (max($editor->get_size()) > self::MAX_IMAGE_DIMENSION) {
             $resized = $editor->resize(self::MAX_IMAGE_DIMENSION, self::MAX_IMAGE_DIMENSION);
 
             if (is_wp_error($resized)) {
                 return $upload;
             }
+
+            $was_resized = true;
         }
 
         $quality = in_array($detected_mime, ['image/png', 'image/gif'], true)
@@ -114,7 +118,7 @@ final class WP_Image_Optimizer {
             return self::save_in_place($editor, $file, $upload);
         }
 
-        return self::convert_to_webp($editor, $file, $upload);
+        return self::convert_to_webp($editor, $file, $upload, $was_resized);
     }
 
     private static function save_in_place(WP_Image_Editor $editor, string $file, array $upload): array {
@@ -131,11 +135,26 @@ final class WP_Image_Optimizer {
         return $upload;
     }
 
-    private static function convert_to_webp(WP_Image_Editor $editor, string $file, array $upload): array {
+    private static function convert_to_webp(WP_Image_Editor $editor, string $file, array $upload, bool $was_resized): array {
         $target = self::unique_webp_target_path($file);
         $saved = $editor->save($target, 'image/webp');
 
         if (is_wp_error($saved) || empty($saved['path']) || !is_file($saved['path'])) {
+            return $upload;
+        }
+
+        // Keep the original when conversion didn't shrink it (e.g. flat PNGs).
+        // Only comparable when pixels are unchanged; a resize always wins.
+        // On stat failure, fall through and keep the WebP.
+        $original_size = filesize($file);
+
+        if (
+            !$was_resized &&
+            $original_size !== false &&
+            $saved['filesize'] >= $original_size
+        ) {
+            wp_delete_file($saved['path']);
+
             return $upload;
         }
 
