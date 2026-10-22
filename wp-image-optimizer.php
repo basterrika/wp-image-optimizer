@@ -7,8 +7,8 @@
  * Author URI: https://basterrika.com
  * Update URI: https://github.com/basterrika/wp-image-optimizer
  * Requires PHP: 8.4
- * Requires at least: 6.5
- * Tested up to: 7.0
+ * Requires at least: 7.0
+ * Tested up to: 7.1
  */
 
 if (!defined('ABSPATH')) {
@@ -17,13 +17,9 @@ if (!defined('ABSPATH')) {
 
 final class WP_Image_Optimizer {
     private const int MAX_IMAGE_DIMENSION = 2560;
-    private const int WEBP_QUALITY_PHOTO = 85; // JPEG/HEIC/HEIF/WebP
-    private const int WEBP_QUALITY_ALPHA = 90; // PNG/GIF (better edges/alpha)
-
     private const array CONVERTIBLE_MIME_TYPES = [
         'image/jpeg' => true,
         'image/png' => true,
-        'image/gif' => true, // non-animated only
         'image/heic' => true,
         'image/heif' => true,
         'image/webp' => true
@@ -81,8 +77,15 @@ final class WP_Image_Optimizer {
             return $upload;
         }
 
-        $editor = wp_get_image_editor($file);
-        if (is_wp_error($editor)) {
+        $editor = wp_get_image_editor($file, ['output_mime_type' => 'image/webp']);
+
+        if (is_wp_error($editor) || !$editor::supports_mime_type('image/webp')) {
+            return $upload;
+        }
+
+        $output_format = wp_get_image_editor_output_format($file, 'image/webp');
+
+        if (($output_format['image/webp'] ?? 'image/webp') !== 'image/webp') {
             return $upload;
         }
 
@@ -104,12 +107,6 @@ final class WP_Image_Optimizer {
         }
 
         self::strip_metadata($editor);
-
-        $quality = in_array($detected_mime, ['image/png', 'image/gif'], true)
-            ? self::WEBP_QUALITY_ALPHA
-            : self::WEBP_QUALITY_PHOTO;
-
-        $editor->set_quality($quality);
 
         /**
          * WebP is treated differently on purpose:
@@ -135,7 +132,7 @@ final class WP_Image_Optimizer {
 
         $saved = $editor->save($temp, 'image/webp');
 
-        if (is_wp_error($saved) || empty($saved['path']) || !is_file($saved['path']) || !rename($saved['path'], $file)) {
+        if (!self::is_valid_webp($saved, $temp) || !rename($temp, $file)) {
             return $upload;
         }
 
@@ -147,10 +144,18 @@ final class WP_Image_Optimizer {
     }
 
     private static function convert_to_webp(WP_Image_Editor $editor, string $file, array $upload, bool $was_resized): array {
-        $target = self::unique_webp_target_path($file);
+        $target = self::reserve_webp_target_path($file);
+
+        if ($target === null) {
+            return $upload;
+        }
+
         $saved = $editor->save($target, 'image/webp');
 
-        if (is_wp_error($saved) || empty($saved['path']) || !is_file($saved['path'])) {
+        if (!self::is_valid_webp($saved, $target)) {
+            // The target is a fresh .webp name, never the original.
+            wp_delete_file($target);
+
             return $upload;
         }
 
@@ -207,12 +212,50 @@ final class WP_Image_Optimizer {
         })->call($editor);
     }
 
-    private static function unique_webp_target_path(string $original_path): string {
+    /**
+     * Saving can report success even when the WebP is not usable. Known cases:
+     * - Some PNGs are saved as an empty file.
+     * - If the server can't make WebP, WordPress quietly saves a JPEG or PNG instead.
+     * - A full disk can leave a file that was cut off partway.
+     *
+     * A WebP file starts with "RIFF", its size, then "WEBP". If that size doesn't match the real one, it's incomplete.
+     */
+    private static function is_valid_webp(array|WP_Error $saved, string $expected_path): bool {
+        if (is_wp_error($saved) || ($saved['mime-type'] ?? null) !== 'image/webp') {
+            return false;
+        }
+
+        clearstatcache(true, $expected_path);
+
+        $header = @file_get_contents($expected_path, false, null, 0, 12);
+
+        return is_string($header)
+               && strlen($header) === 12
+               && str_starts_with($header, 'RIFF')
+               && substr($header, 8, 4) === 'WEBP'
+               && unpack('V', $header, 4)[1] + 8 === filesize($expected_path);
+    }
+
+    /**
+     * Two uploads at the same moment (photo.jpg and photo.png) could both pick photo.webp.
+     * Creating the empty file claims the name. If someone else got there first, pick the next free name.
+     */
+    private static function reserve_webp_target_path(string $original_path): ?string {
         $dir = dirname($original_path);
         $base = pathinfo($original_path, PATHINFO_FILENAME);
-        $unique_filename = wp_unique_filename($dir, $base . '.webp');
 
-        return trailingslashit($dir) . $unique_filename;
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $path = trailingslashit($dir) . wp_unique_filename($dir, $base . '.webp');
+            $handle = @fopen($path, 'xb');
+
+            if ($handle !== false) {
+                fclose($handle);
+
+                return $path;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -220,18 +263,10 @@ final class WP_Image_Optimizer {
      */
     private static function is_animated(string $path, string $mime): bool {
         return match ($mime) {
-            'image/gif' => self::is_animated_gif($path),
             'image/webp' => self::is_animated_webp($path),
             'image/png' => self::is_animated_png($path),
             default => false,
         };
-    }
-
-    private static function is_animated_gif(string $path): bool {
-        $contents = @file_get_contents($path);
-
-        // Counts Graphic Control Extensions (>1 = multiple frames). Frames without one go unnoticed.
-        return $contents === false || substr_count($contents, "\x00\x21\xF9\x04") > 1;
     }
 
     private static function is_animated_webp(string $path): bool {
