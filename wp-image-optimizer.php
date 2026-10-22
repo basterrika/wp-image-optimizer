@@ -33,7 +33,7 @@ final class WP_Image_Optimizer {
         // Also fires for sideloads.
         add_filter('wp_handle_upload', [self::class, 'maybe_convert_upload_to_webp'], 20);
 
-        // Scaling happens before WebP save; prevent core from adding a "-scaled" file.
+        // Scaling happens before WebP save. Prevent core from adding a "-scaled" file.
         add_filter('big_image_size_threshold', '__return_false');
     }
 
@@ -76,8 +76,8 @@ final class WP_Image_Optimizer {
 
         $is_webp_ext = str_ends_with(strtolower($file), '.webp');
 
-        // Avoid flattening animated GIFs
-        if ($detected_mime === 'image/gif' && self::is_animated_gif($file)) {
+        // The editor keeps only the first frame. Never flatten an animation.
+        if (self::is_animated($file, $detected_mime)) {
             return $upload;
         }
 
@@ -86,7 +86,10 @@ final class WP_Image_Optimizer {
             return $upload;
         }
 
-        $editor->maybe_exif_rotate();
+        // Stripping would drop the orientation tag of an image that couldn't be turned upright.
+        if (is_wp_error($editor->maybe_exif_rotate())) {
+            return $upload;
+        }
 
         $was_resized = false;
 
@@ -99,6 +102,8 @@ final class WP_Image_Optimizer {
 
             $was_resized = true;
         }
+
+        self::strip_metadata($editor);
 
         $quality = in_array($detected_mime, ['image/png', 'image/gif'], true)
             ? self::WEBP_QUALITY_ALPHA
@@ -122,13 +127,19 @@ final class WP_Image_Optimizer {
     }
 
     private static function save_in_place(WP_Image_Editor $editor, string $file, array $upload): array {
-        $saved = $editor->save($file, 'image/webp');
+        // Write next to the original, then swap atomically, so a failed or partial write never touches it.
+        $temp = $file . '.tmp.webp';
 
-        if (is_wp_error($saved) || empty($saved['path']) || !is_file($saved['path'])) {
+        // Delete the temp file when the request ends, even if PHP crashes. After a successful save it's already gone.
+        register_shutdown_function('wp_delete_file', $temp);
+
+        $saved = $editor->save($temp, 'image/webp');
+
+        if (is_wp_error($saved) || empty($saved['path']) || !is_file($saved['path']) || !rename($saved['path'], $file)) {
             return $upload;
         }
 
-        $upload['file'] = $saved['path'];
+        $upload['file'] = $file;
         $upload['type'] = 'image/webp';
 
         // URL stays the same (same filename)
@@ -144,7 +155,7 @@ final class WP_Image_Optimizer {
         }
 
         // Keep the original when conversion didn't shrink it (e.g. flat PNGs).
-        // Only comparable when pixels are unchanged; a resize always wins.
+        // Only comparable when pixels are unchanged. A resize always wins.
         // On stat failure, fall through and keep the WebP.
         $original_size = filesize($file);
 
@@ -171,6 +182,31 @@ final class WP_Image_Optimizer {
         return $upload;
     }
 
+    /**
+     * Drops EXIF (GPS, camera serial…), XMP and IPTC. Keeps the ICC color profile. Sub-sizes are built from the
+     * saved file, so they come out clean too. GD never carries metadata. Core's Imagick strip_meta() keeps
+     * EXIF/XMP/IPTC on purpose. Opt out with `add_filter('wp_image_optimizer_strip_metadata', '__return_false')`.
+     */
+    private static function strip_metadata(WP_Image_Editor $editor): void {
+        if (!$editor instanceof WP_Image_Editor_Imagick || !apply_filters('wp_image_optimizer_strip_metadata', true)) {
+            return;
+        }
+
+        // The Imagick instance is protected. Bind to the editor to reach it.
+        (function(): void {
+            try {
+                foreach ($this->image->getImageProfiles('*', false) as $name) {
+                    if ($name !== 'icc' && $name !== 'icm') {
+                        $this->image->removeImageProfile($name);
+                    }
+                }
+            }
+            catch (Throwable) {
+                // The upload shouldn't fail over metadata.
+            }
+        })->call($editor);
+    }
+
     private static function unique_webp_target_path(string $original_path): string {
         $dir = dirname($original_path);
         $base = pathinfo($original_path, PATHINFO_FILENAME);
@@ -179,34 +215,61 @@ final class WP_Image_Optimizer {
         return trailingslashit($dir) . $unique_filename;
     }
 
+    /**
+     * Unreadable files count as animated, so they are left untouched.
+     */
+    private static function is_animated(string $path, string $mime): bool {
+        return match ($mime) {
+            'image/gif' => self::is_animated_gif($path),
+            'image/webp' => self::is_animated_webp($path),
+            'image/png' => self::is_animated_png($path),
+            default => false,
+        };
+    }
+
     private static function is_animated_gif(string $path): bool {
-        if (!is_readable($path)) {
-            return false;
+        $contents = @file_get_contents($path);
+
+        // Counts Graphic Control Extensions (>1 = multiple frames). Frames without one go unnoticed.
+        return $contents === false || substr_count($contents, "\x00\x21\xF9\x04") > 1;
+    }
+
+    private static function is_animated_webp(string $path): bool {
+        $header = @file_get_contents($path, false, null, 0, 21);
+
+        if ($header === false || strlen($header) < 21) {
+            return true;
         }
 
-        $contents = file_get_contents($path, false, null, 0, 1024 * 200);
+        // Extended format (VP8X) carries an animation flag. Simple VP8/VP8L files are always still.
+        return substr($header, 12, 4) === 'VP8X' && (ord($header[20]) & 0x02) !== 0;
+    }
 
-        if ($contents === false) {
-            return false;
+    private static function is_animated_png(string $path): bool {
+        $handle = @fopen($path, 'rb');
+
+        if ($handle === false) {
+            return true;
         }
 
-        // Count Graphic Control Extensions; >1 usually indicates multiple frames.
-        $count = 0;
-        $pattern = "\x00\x21\xF9\x04";
-        $pos = 0;
+        // APNG declares an acTL chunk before the first IDAT. Walk chunk headers only.
+        fseek($handle, 8);
+        $animated = false;
 
-        while (true) {
-            $pos = strpos($contents, $pattern, $pos);
-            if ($pos === false) {
+        while (strlen($chunk = (string)fread($handle, 8)) === 8) {
+            $type = substr($chunk, 4, 4);
+
+            if ($type === 'acTL' || $type === 'IDAT') {
+                $animated = $type === 'acTL';
                 break;
             }
-            if (++$count > 1) {
-                return true;
-            }
-            $pos += 4;
+
+            fseek($handle, unpack('N', $chunk)[1] + 4, SEEK_CUR);
         }
 
-        return false;
+        fclose($handle);
+
+        return $animated;
     }
 }
 
