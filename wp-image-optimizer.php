@@ -31,6 +31,9 @@ final class WP_Image_Optimizer {
 
         // Scaling happens before WebP save. Prevent core from adding a "-scaled" file.
         add_filter('big_image_size_threshold', '__return_false');
+
+        // Keep all image processing on the server. Browser-made files would skip conversion, rotation and stripping.
+        add_filter('wp_client_side_media_processing_enabled', '__return_false');
     }
 
     public static function activate(): void {
