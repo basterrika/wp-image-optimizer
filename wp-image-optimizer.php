@@ -127,7 +127,6 @@ final class WP_Image_Optimizer {
             return $upload;
         }
 
-        $upload['file'] = $file;
         $upload['type'] = 'image/webp';
 
         // URL stays the same (same filename)
