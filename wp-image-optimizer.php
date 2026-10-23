@@ -48,8 +48,7 @@ final class WP_Image_Optimizer {
             !isset($upload['file'], $upload['type']) ||
             !is_string($upload['file']) ||
             !is_string($upload['type']) ||
-            $upload['file'] === '' ||
-            $upload['type'] === ''
+            $upload['file'] === ''
         ) {
             return $upload;
         }
