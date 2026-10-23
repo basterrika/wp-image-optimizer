@@ -34,22 +34,13 @@ final class WP_Image_Optimizer {
     }
 
     public static function activate(): void {
-        if (!function_exists('wp_image_editor_supports')) {
-            self::fail_activation('WordPress image editor is not available on this installation.');
-        }
-
         if (!wp_image_editor_supports(['mime_type' => 'image/webp'])) {
-            self::fail_activation('This server cannot generate WebP images (GD/Imagick WebP support missing).');
+            wp_die(
+                esc_html('This server cannot generate WebP images (GD/Imagick WebP support missing).'),
+                'Image Optimizer',
+                ['back_link' => true]
+            );
         }
-    }
-
-    private static function fail_activation(string $message): void {
-        deactivate_plugins(plugin_basename(__FILE__));
-        wp_die(
-            esc_html($message),
-            'Image Optimizer',
-            ['back_link' => true]
-        );
     }
 
     public static function maybe_convert_upload_to_webp(array $upload): array {
