@@ -108,13 +108,13 @@ final class WP_Image_Optimizer {
          *   bytes into a ".jpg" file path.
          */
         if ($is_webp_ext) {
-            return self::save_in_place($editor, $file, $upload);
+            return self::save_in_place($editor, $file, $upload, $was_resized);
         }
 
         return self::convert_to_webp($editor, $file, $upload, $was_resized);
     }
 
-    private static function save_in_place(WP_Image_Editor $editor, string $file, array $upload): array {
+    private static function save_in_place(WP_Image_Editor $editor, string $file, array $upload, bool $was_resized): array {
         // Write next to the original, then swap atomically, so a failed or partial write never touches it.
         $temp = $file . '.tmp.webp';
 
@@ -123,7 +123,25 @@ final class WP_Image_Optimizer {
 
         $saved = $editor->save($temp, 'image/webp');
 
-        if (!self::is_valid_webp($saved, $temp) || !rename($temp, $file)) {
+        if (!self::is_valid_webp($saved, $temp)) {
+            return $upload;
+        }
+
+        // Keep the original unless re-encoding saves space or resizing was required.
+        // On stat failure, fall through and keep the WebP, as with conversion.
+        $original_size = filesize($file);
+
+        if (
+            !$was_resized &&
+            $original_size !== false &&
+            $saved['filesize'] >= $original_size
+        ) {
+            wp_delete_file($temp);
+
+            return $upload;
+        }
+
+        if (!rename($temp, $file)) {
             return $upload;
         }
 
