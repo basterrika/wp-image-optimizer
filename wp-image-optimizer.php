@@ -67,15 +67,15 @@ final class WP_Image_Optimizer {
             return $upload;
         }
 
-        $editor = wp_get_image_editor($file, ['output_mime_type' => 'image/webp']);
-
-        if (is_wp_error($editor) || !$editor::supports_mime_type('image/webp')) {
-            return $upload;
-        }
-
         $output_format = wp_get_image_editor_output_format($file, 'image/webp');
 
         if (($output_format['image/webp'] ?? 'image/webp') !== 'image/webp') {
+            return $upload;
+        }
+
+        $editor = wp_get_image_editor($file, ['output_mime_type' => 'image/webp']);
+
+        if (is_wp_error($editor) || !$editor::supports_mime_type('image/webp')) {
             return $upload;
         }
 
