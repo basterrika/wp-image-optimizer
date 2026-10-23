@@ -79,11 +79,6 @@ final class WP_Image_Optimizer {
             return $upload;
         }
 
-        // Stripping would drop the orientation tag of an image that couldn't be turned upright.
-        if (is_wp_error($editor->maybe_exif_rotate())) {
-            return $upload;
-        }
-
         $was_resized = false;
 
         if (max($editor->get_size()) > self::MAX_IMAGE_DIMENSION) {
@@ -94,6 +89,12 @@ final class WP_Image_Optimizer {
             }
 
             $was_resized = true;
+        }
+
+        // Rotate after resizing to avoid a second full-resolution image allocation.
+        // Stripping would drop the orientation tag of an image that couldn't be turned upright.
+        if (is_wp_error($editor->maybe_exif_rotate())) {
+            return $upload;
         }
 
         self::strip_metadata($editor);
